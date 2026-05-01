@@ -25,6 +25,9 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Generate Tauri icons
+        run: npx tauri icon src-tauri/app-icon.svg
+
       - name: Build Tauri app
         run: npm run tauri build
 
