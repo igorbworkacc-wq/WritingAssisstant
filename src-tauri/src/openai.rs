@@ -79,10 +79,34 @@ pub async fn test_model(model: String) -> AppResult<()> {
     .await
 }
 
+pub async fn list_available_models() -> AppResult<Vec<String>> {
+    let api_key = secure_store::get_api_key()?;
+    list_available_models_with_key(&api_key).await
+}
+
+pub async fn is_model_available(model: String) -> AppResult<bool> {
+    let model = model.trim();
+    if model.is_empty() {
+        return Ok(false);
+    }
+
+    let models = list_available_models().await?;
+    Ok(models.iter().any(|available| available == model))
+}
+
 async fn test_model_with_settings(settings: ModelSettings) -> AppResult<()> {
     let api_key = secure_store::get_api_key()?;
-    if settings.selected_model.trim().is_empty() {
-        return Err(AppError::ModelUnavailable);
+    let selected_model = settings.selected_model.trim();
+    if selected_model.is_empty() {
+        return Err(AppError::ModelNotAvailableForKey);
+    }
+
+    let available_models = list_available_models_with_key(&api_key).await?;
+    if !available_models
+        .iter()
+        .any(|available| available == selected_model)
+    {
+        return Err(AppError::ModelNotAvailableForKey);
     }
 
     let client = reqwest::Client::builder()
@@ -100,6 +124,32 @@ async fn test_model_with_settings(settings: ModelSettings) -> AppResult<()> {
         || build_test_body(&settings, false),
     )
     .await
+}
+
+async fn list_available_models_with_key(api_key: &str) -> AppResult<Vec<String>> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .map_err(|_| AppError::Network)?;
+
+    let response = client
+        .get(OPENAI_MODELS_URL)
+        .bearer_auth(api_key)
+        .send()
+        .await
+        .map_err(|_| AppError::Network)?;
+
+    let status = response.status();
+    if !status.is_success() {
+        map_api_key_status(status)?;
+        return Err(AppError::Network);
+    }
+
+    let parsed: OpenAiModelsResponse = response
+        .json()
+        .await
+        .map_err(|_| AppError::UnexpectedResponseFormat)?;
+    Ok(parsed.data.into_iter().map(|model| model.id).collect())
 }
 
 async fn call_openai_text_transform(
@@ -171,8 +221,13 @@ where
 {
     let status = response.status();
     if status.is_success() {
-        let parsed: OpenAiResponse = response.json().await.map_err(|_| AppError::Network)?;
-        return parsed.output_text().ok_or(AppError::EmptyApiResponse);
+        let parsed: OpenAiResponse = response
+            .json()
+            .await
+            .map_err(|_| AppError::UnexpectedResponseFormat)?;
+        return parsed
+            .output_text()
+            .ok_or(AppError::UnexpectedResponseFormat);
     }
 
     let body = response.text().await.unwrap_or_default();
@@ -180,8 +235,13 @@ where
         let retry = send_openai_request(client, url, api_key, &retry_body()).await?;
         let retry_status = retry.status();
         if retry_status.is_success() {
-            let parsed: OpenAiResponse = retry.json().await.map_err(|_| AppError::Network)?;
-            return parsed.output_text().ok_or(AppError::EmptyApiResponse);
+            let parsed: OpenAiResponse = retry
+                .json()
+                .await
+                .map_err(|_| AppError::UnexpectedResponseFormat)?;
+            return parsed
+                .output_text()
+                .ok_or(AppError::UnexpectedResponseFormat);
         }
         let retry_body = retry.text().await.unwrap_or_default();
         map_status(retry_status, &retry_body)?;
@@ -229,7 +289,8 @@ fn build_transform_body(
     let mut body = json!({
         "model": model_settings.selected_model.as_str(),
         "instructions": prompt.system,
-        "input": prompt.user
+        "input": prompt.user,
+        "max_output_tokens": 1000
     });
 
     if include_temperature {
@@ -260,11 +321,11 @@ fn map_status(status: StatusCode, body: &str) -> AppResult<()> {
     if status == StatusCode::TOO_MANY_REQUESTS {
         return Err(AppError::RateLimited);
     }
-    if status == StatusCode::BAD_REQUEST
-        || status == StatusCode::NOT_FOUND
-        || is_model_unavailable_error(body)
-    {
+    if is_model_unavailable_error(body) {
         return Err(AppError::ModelUnavailable);
+    }
+    if status == StatusCode::BAD_REQUEST || status == StatusCode::NOT_FOUND {
+        return Err(AppError::RequestFormat);
     }
     if !status.is_success() {
         return Err(AppError::Network);
@@ -299,12 +360,26 @@ fn is_temperature_unsupported_error(body: &str) -> bool {
 
 fn is_model_unavailable_error(body: &str) -> bool {
     let lower = body.to_ascii_lowercase();
-    lower.contains("model")
-        && (lower.contains("not found")
-            || lower.contains("does not exist")
-            || lower.contains("invalid")
-            || lower.contains("unavailable")
-            || lower.contains("access"))
+    lower.contains("invalid model")
+        || lower.contains("model")
+            && (lower.contains("not found")
+                || lower.contains("does not exist")
+                || lower.contains("unavailable")
+                || lower.contains("not available")
+                || lower.contains("no access")
+                || lower.contains("not have access")
+                || lower.contains("do not have access")
+                || lower.contains("unsupported model"))
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct OpenAiModelsResponse {
+    data: Vec<OpenAiModel>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct OpenAiModel {
+    id: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

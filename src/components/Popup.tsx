@@ -1,5 +1,5 @@
 import type { OperationState } from "../types/diff";
-import type { ModelPreset, ModelSettings } from "../types/model";
+import type { ModelAvailabilityStatus, ModelPreset, ModelSettings, ModelTestStatus } from "../types/model";
 import { DiffSection } from "./DiffSection";
 import { ModelSettingsPanel } from "./ModelSettingsPanel";
 import { SettingsPanel } from "./SettingsPanel";
@@ -19,12 +19,17 @@ interface PopupProps {
   testingModel: boolean;
   modelError?: string;
   modelMessage?: string;
+  availableModels: string[] | null;
+  refreshingModels: boolean;
+  modelAvailability: ModelAvailabilityStatus;
+  modelTestStatus: ModelTestStatus;
   onSaveKey: (apiKey: string) => Promise<boolean>;
   onTestKey: () => Promise<void>;
   onShowSettings: () => void;
   onShowModelSettings: () => void;
   onSaveModel: (settings: ModelSettings) => Promise<void>;
   onTestStoredModel: () => Promise<void>;
+  onRefreshAvailableModels: () => Promise<void>;
   onHideToTray: () => void;
   onQuit: () => void;
   onClose: () => void;
@@ -48,12 +53,17 @@ export function Popup({
   testingModel,
   modelError,
   modelMessage,
+  availableModels,
+  refreshingModels,
+  modelAvailability,
+  modelTestStatus,
   onSaveKey,
   onTestKey,
   onShowSettings,
   onShowModelSettings,
   onSaveModel,
   onTestStoredModel,
+  onRefreshAvailableModels,
   onHideToTray,
   onQuit,
   onClose,
@@ -95,9 +105,14 @@ export function Popup({
         testing={testingModel}
         error={modelError}
         message={modelMessage}
+        availableModels={availableModels}
+        refreshingModels={refreshingModels}
+        availability={modelAvailability}
+        testStatus={modelTestStatus}
         apiKeyConfigured={hasApiKey}
         onSave={onSaveModel}
         onTest={onTestStoredModel}
+        onRefreshAvailableModels={onRefreshAvailableModels}
       />
 
       {state.operationError ? <div className="topError">{state.operationError}</div> : null}

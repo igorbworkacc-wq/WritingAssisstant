@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import type { ModelPreset, ModelSettings } from "../types/model";
+import type { ModelAvailabilityStatus, ModelPreset, ModelSettings, ModelTestStatus } from "../types/model";
 
 const CUSTOM_MODEL = "custom";
 const FALLBACK_MODEL = "gpt-4o-mini";
@@ -12,9 +12,14 @@ interface ModelSettingsPanelProps {
   testing: boolean;
   error?: string;
   message?: string;
+  availableModels: string[] | null;
+  refreshingModels: boolean;
+  availability: ModelAvailabilityStatus;
+  testStatus: ModelTestStatus;
   apiKeyConfigured: boolean;
   onSave: (settings: ModelSettings) => Promise<void>;
   onTest: () => Promise<void>;
+  onRefreshAvailableModels: () => Promise<void>;
 }
 
 export function ModelSettingsPanel({
@@ -25,9 +30,14 @@ export function ModelSettingsPanel({
   testing,
   error,
   message,
+  availableModels,
+  refreshingModels,
+  availability,
+  testStatus,
   apiKeyConfigured,
   onSave,
-  onTest
+  onTest,
+  onRefreshAvailableModels
 }: ModelSettingsPanelProps) {
   const presetIds = useMemo(() => new Set(presets.map((preset) => preset.id)), [presets]);
   const [open, setOpen] = useState(forceOpen);
@@ -54,6 +64,7 @@ export function ModelSettingsPanel({
   const parsedTemperature = Number.parseFloat(temperature);
   const validTemperature = Number.isFinite(parsedTemperature) && parsedTemperature >= 0 && parsedTemperature <= 2;
   const canSave = modelToSave.length > 0 && validTemperature;
+  const displayedAvailability = availableModels ? availabilityFor(modelToSave, availableModels) : availability;
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -70,6 +81,17 @@ export function ModelSettingsPanel({
   function useFallbackModel() {
     setSelectedOption(FALLBACK_MODEL);
     setCustomModel("");
+  }
+
+  function useAvailableModel(model: string) {
+    if (presetIds.has(model)) {
+      setSelectedOption(model);
+      setCustomModel("");
+      return;
+    }
+
+    setSelectedOption(CUSTOM_MODEL);
+    setCustomModel(model);
   }
 
   if (!open) {
@@ -106,11 +128,21 @@ export function ModelSettingsPanel({
         >
           {presets.map((preset) => (
             <option key={preset.id} value={preset.id}>
-              {preset.id === CUSTOM_MODEL ? preset.label : `${preset.label} - ${preset.id}`}
+              {preset.id === CUSTOM_MODEL
+                ? preset.label
+                : `${preset.label} - ${preset.id} - ${availabilityLabel(
+                    availabilityFor(preset.id, availableModels)
+                  )}`}
             </option>
           ))}
         </select>
       </label>
+
+      <div className="modelStatusGrid">
+        <span>Selected model: {modelToSave || "none"}</span>
+        <span>Availability: {availabilityLabel(displayedAvailability)}</span>
+        <span>Last model test: {testStatusLabel(testStatus)}</span>
+      </div>
 
       {selectedOption === CUSTOM_MODEL ? (
         <label className="fieldLabel">
@@ -151,6 +183,42 @@ export function ModelSettingsPanel({
       {error ? <div className="errorState">{error}</div> : null}
       {message ? <div className="successState">{message}</div> : null}
 
+      <details className="availableModels">
+        <summary>Available models from this API key/project</summary>
+        <div className="settingsActions">
+          <button
+            type="button"
+            className="secondaryButton"
+            onClick={onRefreshAvailableModels}
+            disabled={!apiKeyConfigured || refreshingModels}
+          >
+            Refresh available models
+          </button>
+        </div>
+        {availableModels ? (
+          <>
+            <p>{availableModels.length} model IDs available.</p>
+            <select
+              value=""
+              onChange={(event) => {
+                if (event.target.value) {
+                  useAvailableModel(event.target.value);
+                }
+              }}
+            >
+              <option value="">Choose an available model</option>
+              {availableModels.map((model) => (
+                <option key={model} value={model}>
+                  {model}
+                </option>
+              ))}
+            </select>
+          </>
+        ) : (
+          <p>Availability has not been checked yet.</p>
+        )}
+      </details>
+
       <div className="settingsActions">
         <button type="submit" className="primaryButton" disabled={saving || !canSave}>
           Save model
@@ -169,4 +237,34 @@ export function ModelSettingsPanel({
       </div>
     </form>
   );
+}
+
+function availabilityFor(model: string, availableModels: string[] | null): ModelAvailabilityStatus {
+  if (!availableModels) {
+    return "not_checked";
+  }
+
+  return availableModels.includes(model) ? "available" : "not_found";
+}
+
+function availabilityLabel(status: ModelAvailabilityStatus) {
+  switch (status) {
+    case "available":
+      return "available";
+    case "not_found":
+      return "not found in available model list";
+    default:
+      return "not checked yet";
+  }
+}
+
+function testStatusLabel(status: ModelTestStatus) {
+  switch (status) {
+    case "successful":
+      return "successful";
+    case "failed":
+      return "failed";
+    default:
+      return "not tested";
+  }
 }

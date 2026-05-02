@@ -7,7 +7,7 @@ import { buildDiffTokens, reconstructText, toggleToken } from "./lib/diffTokens"
 import { Popup } from "./components/Popup";
 import type { OperationErrorPayload, OperationStartedPayload } from "./types/tauri";
 import type { OperationState, SectionKind, TransformSectionState } from "./types/diff";
-import type { ModelPreset, ModelSettings } from "./types/model";
+import type { ModelAvailabilityStatus, ModelPreset, ModelSettings, ModelTestStatus } from "./types/model";
 
 type Action =
   | {
@@ -185,6 +185,10 @@ export default function App() {
   const [testingModel, setTestingModel] = useState(false);
   const [modelError, setModelError] = useState<string>();
   const [modelMessage, setModelMessage] = useState<string>();
+  const [availableModels, setAvailableModels] = useState<string[] | null>(null);
+  const [refreshingModels, setRefreshingModels] = useState(false);
+  const [modelAvailability, setModelAvailability] = useState<ModelAvailabilityStatus>("not_checked");
+  const [modelTestStatus, setModelTestStatus] = useState<ModelTestStatus>("not_tested");
   const requestCounter = useRef(0);
 
   useEffect(() => {
@@ -336,6 +340,9 @@ export default function App() {
     try {
       await invoke("set_model_settings", { settings: nextSettings });
       const confirmed = await refreshModelSettings();
+      const availability = availabilityForModel(confirmed.selected_model, availableModels);
+      setModelAvailability(availability);
+      setModelTestStatus("not_tested");
       setModelMessage(`Model settings saved: ${confirmed.selected_model}`);
       setModelSettingsMode(false);
     } catch (error) {
@@ -352,17 +359,56 @@ export default function App() {
     setModelMessage(undefined);
     try {
       await invoke("test_selected_model");
+      setModelAvailability("available");
+      setModelTestStatus("successful");
       setModelMessage("Model test successful.");
     } catch (error) {
       const message = errorMessage(error);
-      setModelError(
-        message === "The selected OpenAI model is unavailable or invalid. Please choose another model in Settings."
-          ? "The selected model is not available for this API key. Try GPT-5 mini or GPT-4o mini, or enter a custom model ID."
-          : message
-      );
+      setModelTestStatus("failed");
+      if (
+        message ===
+        "The selected model is not available for this API key. Choose another model from the available models list."
+      ) {
+        setModelAvailability("not_found");
+        setModelError(
+          `${modelSettings.selected_model} was not found in the models available to this API key.`
+        );
+      } else if (message === "OpenAI request format failed. Please update the app.") {
+        setModelError(
+          modelAvailability === "available"
+            ? "Model is available, but the generation request failed. The app may need an OpenAI request-format update."
+            : message
+        );
+      } else {
+        setModelError(message);
+      }
       setModelSettingsMode(true);
     } finally {
       setTestingModel(false);
+    }
+  }
+
+  async function handleRefreshAvailableModels() {
+    setRefreshingModels(true);
+    setModelError(undefined);
+    setModelMessage(undefined);
+    try {
+      const models = await invoke<string[]>("list_available_models");
+      const sortedModels = [...models].sort((a, b) => a.localeCompare(b));
+      const availability = availabilityForModel(modelSettings.selected_model, sortedModels);
+      setAvailableModels(sortedModels);
+      setModelAvailability(availability);
+      setModelMessage(
+        availability === "available"
+          ? "Available models refreshed. Selected model is available to this API key."
+          : "Available models refreshed. Selected model was not found in the models available to this API key."
+      );
+    } catch (error) {
+      setModelAvailability("not_checked");
+      setModelError(errorMessage(error));
+      setModelSettingsMode(true);
+    } finally {
+      setRefreshingModels(false);
     }
   }
 
@@ -436,12 +482,17 @@ export default function App() {
       testingModel={testingModel}
       modelError={modelError}
       modelMessage={modelMessage}
+      availableModels={availableModels}
+      refreshingModels={refreshingModels}
+      modelAvailability={modelAvailability}
+      modelTestStatus={modelTestStatus}
       onSaveKey={handleSaveKey}
       onTestKey={handleTestKey}
       onShowSettings={() => setSettingsMode(true)}
       onShowModelSettings={() => setModelSettingsMode(true)}
       onSaveModel={handleSaveModel}
       onTestStoredModel={handleTestStoredModel}
+      onRefreshAvailableModels={handleRefreshAvailableModels}
       onHideToTray={() => void invoke("hide_to_tray")}
       onQuit={() => void invoke("quit_app")}
       onClose={handleClose}
@@ -465,6 +516,7 @@ export default function App() {
   async function refreshModelSettings() {
     const settings = await invoke<ModelSettings>("get_model_settings");
     setModelSettings(settings);
+    setModelAvailability(availabilityForModel(settings.selected_model, availableModels));
     return settings;
   }
 
@@ -473,7 +525,10 @@ export default function App() {
       void refreshApiKeyStatus();
       setSettingsMode(true);
     }
-    if (message === "The selected OpenAI model is unavailable or invalid. Please choose another model in Settings.") {
+    if (
+      message === "The selected OpenAI model is unavailable or invalid. Please choose another model in Settings." ||
+      message === "The selected model is not available for this API key. Choose another model from the available models list."
+    ) {
       setModelError(message);
       setModelSettingsMode(true);
     }
@@ -522,6 +577,14 @@ function nextRequestId(counter: MutableRefObject<number>) {
 
 function errorMessage(error: unknown) {
   return typeof error === "string" ? error : "Something went wrong. Please try again.";
+}
+
+function availabilityForModel(model: string, availableModels: string[] | null): ModelAvailabilityStatus {
+  if (!availableModels) {
+    return "not_checked";
+  }
+
+  return availableModels.includes(model) ? "available" : "not_found";
 }
 
 function isEditableTarget(target: EventTarget | null) {

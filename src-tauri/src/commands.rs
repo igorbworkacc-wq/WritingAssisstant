@@ -90,6 +90,16 @@ pub async fn test_model(model: String) -> AppResult<()> {
 }
 
 #[tauri::command]
+pub async fn list_available_models() -> AppResult<Vec<String>> {
+    openai::list_available_models().await
+}
+
+#[tauri::command]
+pub async fn is_model_available(model: String) -> AppResult<bool> {
+    openai::is_model_available(model).await
+}
+
+#[tauri::command]
 pub async fn run_correction(
     app: AppHandle,
     _operation_id: String,

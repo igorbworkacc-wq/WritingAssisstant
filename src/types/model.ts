@@ -9,3 +9,7 @@ export interface ModelPreset {
   description: string;
   recommended_for: string;
 }
+
+export type ModelAvailabilityStatus = "not_checked" | "available" | "not_found";
+
+export type ModelTestStatus = "not_tested" | "successful" | "failed";

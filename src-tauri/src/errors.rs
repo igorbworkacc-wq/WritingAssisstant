@@ -30,6 +30,14 @@ pub enum AppError {
     SecureStore,
     #[error("The selected OpenAI model is unavailable or invalid. Please choose another model in Settings.")]
     ModelUnavailable,
+    #[error("The selected model is not available for this API key. Choose another model from the available models list.")]
+    ModelNotAvailableForKey,
+    #[error("OpenAI request format failed. Please update the app.")]
+    RequestFormat,
+    #[error("OpenAI returned an unexpected response format. Please update the app.")]
+    UnexpectedResponseFormat,
+    #[error("Selected model rejected one of the request parameters. Retrying without optional parameters.")]
+    UnsupportedParameter,
     #[error("Model settings could not be saved or loaded.")]
     Settings,
     #[error("The application window could not be shown.")]
@@ -62,6 +70,16 @@ impl AppError {
             AppError::SecureStore => "The API key could not be saved securely.",
             AppError::ModelUnavailable => {
                 "The selected OpenAI model is unavailable or invalid. Please choose another model in Settings."
+            }
+            AppError::ModelNotAvailableForKey => {
+                "The selected model is not available for this API key. Choose another model from the available models list."
+            }
+            AppError::RequestFormat => "OpenAI request format failed. Please update the app.",
+            AppError::UnexpectedResponseFormat => {
+                "OpenAI returned an unexpected response format. Please update the app."
+            }
+            AppError::UnsupportedParameter => {
+                "Selected model rejected one of the request parameters. Retrying without optional parameters."
             }
             AppError::Settings => "Model settings could not be saved or loaded.",
             AppError::Window => "The application window could not be shown.",

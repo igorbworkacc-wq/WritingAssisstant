@@ -125,6 +125,13 @@ button {
   font-size: 13px;
 }
 
+.modelStatusGrid {
+  display: grid;
+  gap: 4px;
+  color: #455466;
+  font-size: 13px;
+}
+
 .advancedSettings {
   border: 1px solid #e0e6ed;
   border-radius: 6px;
@@ -136,6 +143,23 @@ button {
   color: #455466;
   font-weight: 600;
   font-size: 13px;
+}
+
+.availableModels {
+  border: 1px solid #e0e6ed;
+  border-radius: 6px;
+  padding: 9px 10px;
+}
+
+.availableModels summary {
+  cursor: pointer;
+  color: #455466;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.availableModels p {
+  margin: 8px 0;
 }
 
 .topError,

@@ -23,6 +23,8 @@ pub fn run() {
             commands::get_model_presets,
             commands::test_selected_model,
             commands::test_model,
+            commands::list_available_models,
+            commands::is_model_available,
             commands::run_correction,
             commands::run_rephrase,
             commands::apply_text,
