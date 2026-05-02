@@ -16,6 +16,7 @@ body {
   min-width: 640px;
   min-height: 500px;
   background: #eef2f5;
+  overflow: hidden;
 }
 
 button,
@@ -29,6 +30,7 @@ button {
 }
 
 .appShell {
+  position: relative;
   width: 100vw;
   height: 100vh;
   display: flex;
@@ -36,14 +38,29 @@ button {
   gap: 14px;
   padding: 18px;
   background: #f7f9fb;
+  overflow: hidden;
 }
 
 .appHeader {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
   border-bottom: 1px solid #d9e0e7;
   padding-bottom: 12px;
+}
+
+.appMain {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow: auto;
+}
+
+.appMain:focus {
+  outline: none;
 }
 
 .appHeader h1 {
@@ -182,6 +199,7 @@ button {
 }
 
 .readyPanel {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -215,10 +233,33 @@ button {
 }
 
 .operationMeta {
-  margin-top: -4px;
+  margin-top: 0;
+}
+
+.operationView {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow: hidden;
+}
+
+.operationToolbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #d9e0e7;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #ffffff;
 }
 
 .originalPreview {
+  flex: 0 0 auto;
   border: 1px solid #d9e0e7;
   border-radius: 8px;
   background: #ffffff;
@@ -243,14 +284,15 @@ button {
 }
 
 .sectionsGrid {
+  flex: 1 1 auto;
   min-height: 0;
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 14px;
-  flex: 1;
 }
 
 .diffSection {
+  overflow: hidden;
   min-width: 0;
   min-height: 0;
   display: flex;
@@ -263,6 +305,7 @@ button {
 }
 
 .sectionHeader {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -276,16 +319,18 @@ button {
 }
 
 .sectionState {
+  flex: 1 1 auto;
   display: grid;
   place-items: center;
-  min-height: 180px;
+  min-height: 0;
+  overflow: auto;
   color: #637083;
   font-size: 13px;
 }
 
 .tokenRenderer {
-  flex: 1;
-  min-height: 190px;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: auto;
   padding: 12px;
   border-radius: 7px;
@@ -332,8 +377,53 @@ button {
 }
 
 .sectionActions {
+  flex: 0 0 auto;
   display: flex;
   justify-content: flex-end;
+}
+
+.settingsOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  justify-content: flex-end;
+  background: rgb(23 32 42 / 0.22);
+}
+
+.settingsDrawer {
+  width: min(520px, 100%);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid #d7dde5;
+  background: #f7f9fb;
+  box-shadow: -18px 0 36px rgb(23 32 42 / 0.14);
+}
+
+.drawerHeader {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px;
+  border-bottom: 1px solid #d9e0e7;
+}
+
+.drawerHeader h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.drawerContent {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow: auto;
+  padding: 18px;
 }
 
 .primaryButton,
@@ -367,6 +457,11 @@ button {
 
   .sectionsGrid {
     grid-template-columns: 1fr;
+  }
+
+  .operationToolbar {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .readyPanel,

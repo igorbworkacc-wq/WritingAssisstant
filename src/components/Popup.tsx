@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import type { OperationState } from "../types/diff";
 import type { ModelAvailabilityStatus, ModelPreset, ModelSettings, ModelTestStatus } from "../types/model";
 import { DiffSection } from "./DiffSection";
@@ -72,19 +73,17 @@ export function Popup({
   onRetryRephrase
 }: PopupProps) {
   const hasOperation = Boolean(state.operationId);
+  const [activeSettingsOpen, setActiveSettingsOpen] = useState(false);
+  const mainRef = useRef<HTMLDivElement>(null);
 
-  return (
-    <main className="appShell">
-      <header className="appHeader">
-        <div>
-          <h1>PrivacyTextAssistant</h1>
-          <p>Ctrl+Space</p>
-        </div>
-        <button type="button" className="iconButton" onClick={onClose} aria-label="Close">
-          x
-        </button>
-      </header>
+  useEffect(() => {
+    setActiveSettingsOpen(false);
+    mainRef.current?.scrollTo({ top: 0 });
+    mainRef.current?.focus();
+  }, [state.operationId]);
 
+  const settingsContent = (
+    <>
       <SettingsPanel
         configured={hasApiKey}
         saving={savingKey}
@@ -114,80 +113,137 @@ export function Popup({
         onTest={onTestStoredModel}
         onRefreshAvailableModels={onRefreshAvailableModels}
       />
+    </>
+  );
 
-      {state.operationError ? <div className="topError">{state.operationError}</div> : null}
-
-      {hasOperation ? (
-        <>
-          <details className="originalPreview">
-            <summary>Original text</summary>
-            <pre>{state.originalText}</pre>
-          </details>
-          <div className="operationMeta">Using model: {state.model}</div>
-
-          <div className="sectionsGrid">
-            <DiffSection
-              title="Corrected Text"
-              state={state.correction}
-              onTokenClick={(tokenId) => onTokenClick("correction", tokenId)}
-              onApply={() => onApply("correction")}
-            />
-            <DiffSection
-              title="Rephrased Text"
-              state={state.rephrase}
-              onTokenClick={(tokenId) => onTokenClick("rephrase", tokenId)}
-              onApply={() => onApply("rephrase")}
-              onRetry={onRetryRephrase}
-              retryDisabled={!hasApiKey || !state.operationId}
-            />
-          </div>
-        </>
-      ) : (
-        <div className="readyPanel">
-          <div>
-            <h2>Ready</h2>
-            <p>
-              {hasApiKey
-                ? "Highlight text in any app and press Ctrl+Space."
-                : "An OpenAI API key is required before correction and rephrase can work."}
-            </p>
-            <div className="statusMeta">
-              <span>API key: {hasApiKey ? "configured" : "missing"}</span>
-              <span>Model: {modelSettings.selected_model}</span>
-            </div>
-          </div>
-          <div className="readyActions">
-            <button type="button" className="secondaryButton" onClick={onShowSettings}>
-              Replace API key
-            </button>
-            <button type="button" className="secondaryButton" onClick={onShowModelSettings}>
-              Model settings
-            </button>
-            <button
-              type="button"
-              className="secondaryButton"
-              onClick={onTestKey}
-              disabled={!hasApiKey || testingKey}
-            >
-              Test API key
-            </button>
-            <button
-              type="button"
-              className="secondaryButton"
-              onClick={onTestStoredModel}
-              disabled={!hasApiKey || testingModel}
-            >
-              Test model
-            </button>
-            <button type="button" className="secondaryButton" onClick={onHideToTray}>
-              Hide to tray
-            </button>
-            <button type="button" className="secondaryButton" onClick={onQuit}>
-              Quit
-            </button>
-          </div>
+  return (
+    <main className="appShell">
+      <header className="appHeader">
+        <div>
+          <h1>PrivacyTextAssistant</h1>
+          <p>Ctrl+Space</p>
         </div>
-      )}
+        <button type="button" className="iconButton" onClick={onClose} aria-label="Close">
+          x
+        </button>
+      </header>
+
+      <div className="appMain" ref={mainRef} tabIndex={-1}>
+        {hasOperation ? (
+          <div className="operationView">
+            <div className="operationToolbar">
+              <div className="operationMeta">
+                <span>Using model: {state.model}</span>
+                <span>API key: {hasApiKey ? "configured" : "missing"}</span>
+              </div>
+              <div className="settingsActions">
+                <button
+                  type="button"
+                  className="secondaryButton"
+                  onClick={() => setActiveSettingsOpen(true)}
+                >
+                  Settings
+                </button>
+                <button type="button" className="secondaryButton" onClick={onClose}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+
+            {state.operationError ? <div className="topError">{state.operationError}</div> : null}
+
+            <details className="originalPreview">
+              <summary>Original text</summary>
+              <pre>{state.originalText}</pre>
+            </details>
+
+            <div className="sectionsGrid">
+              <DiffSection
+                title="Corrected Text"
+                state={state.correction}
+                onTokenClick={(tokenId) => onTokenClick("correction", tokenId)}
+                onApply={() => onApply("correction")}
+              />
+              <DiffSection
+                title="Rephrased Text"
+                state={state.rephrase}
+                onTokenClick={(tokenId) => onTokenClick("rephrase", tokenId)}
+                onApply={() => onApply("rephrase")}
+                onRetry={onRetryRephrase}
+                retryDisabled={!hasApiKey || !state.operationId}
+              />
+            </div>
+
+            {activeSettingsOpen ? (
+              <div className="settingsOverlay" role="dialog" aria-modal="true" aria-label="Settings">
+                <div className="settingsDrawer">
+                  <div className="drawerHeader">
+                    <h2>Settings</h2>
+                    <button
+                      type="button"
+                      className="iconButton"
+                      onClick={() => setActiveSettingsOpen(false)}
+                      aria-label="Close settings"
+                    >
+                      x
+                    </button>
+                  </div>
+                  <div className="drawerContent">{settingsContent}</div>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <>
+            {settingsContent}
+            {state.operationError ? <div className="topError">{state.operationError}</div> : null}
+            <div className="readyPanel">
+              <div>
+                <h2>Ready</h2>
+                <p>
+                  {hasApiKey
+                    ? "Highlight text in any app and press Ctrl+Space."
+                    : "An OpenAI API key is required before correction and rephrase can work."}
+                </p>
+                <div className="statusMeta">
+                  <span>API key: {hasApiKey ? "configured" : "missing"}</span>
+                  <span>Model: {modelSettings.selected_model}</span>
+                </div>
+              </div>
+              <div className="readyActions">
+                <button type="button" className="secondaryButton" onClick={onShowSettings}>
+                  Replace API key
+                </button>
+                <button type="button" className="secondaryButton" onClick={onShowModelSettings}>
+                  Model settings
+                </button>
+                <button
+                  type="button"
+                  className="secondaryButton"
+                  onClick={onTestKey}
+                  disabled={!hasApiKey || testingKey}
+                >
+                  Test API key
+                </button>
+                <button
+                  type="button"
+                  className="secondaryButton"
+                  onClick={onTestStoredModel}
+                  disabled={!hasApiKey || testingModel}
+                >
+                  Test model
+                </button>
+                <button type="button" className="secondaryButton" onClick={onHideToTray}>
+                  Hide to tray
+                </button>
+                <button type="button" className="secondaryButton" onClick={onQuit}>
+                  Quit
+                </button>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
     </main>
   );
 }
