@@ -30,6 +30,7 @@ export interface TransformSectionState {
 export interface OperationState {
   operationId: string | null;
   originalText: string;
+  model: string;
   correction: TransformSectionState;
   rephrase: TransformSectionState;
   targetCaptured: boolean;

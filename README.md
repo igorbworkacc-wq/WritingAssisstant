@@ -25,6 +25,22 @@ $env:OPENAI_API_KEY = "sk-..."
 npm run tauri:dev
 ```
 
+## Model Selection
+
+The app uses the selected OpenAI API model for both correction and rephrase calls. The default model is `gpt-5-nano` unless changed in Settings.
+
+`gpt-5-nano` is the preferred low-cost option for short writing tasks in this app. `gpt-5-mini` is available as a higher-capability cost-conscious option, `gpt-4o-mini` is retained as a legacy fallback preset, and `gpt-5` is available when output quality is more important than cost. A custom model ID can also be entered.
+
+Some models may not be available to every API account. The model ID must exactly match an OpenAI API model ID. Pricing changes over time, so users should verify current OpenAI API pricing before selecting a model.
+
+Model preference precedence:
+
+1. User-selected model from persisted app settings.
+2. `OPENAI_MODEL` environment variable.
+3. Built-in default: `gpt-5-nano`.
+
+The model ID is stored locally as a non-sensitive preference in the app config directory. The API key remains stored separately through secure storage.
+
 ## Run in Development
 
 Install JavaScript dependencies:
@@ -77,11 +93,24 @@ Default global shortcut: `Ctrl+Space`
 
 When pressed, the backend captures the foreground window, snapshots the text clipboard, simulates `Ctrl+C`, reads the selected text, and opens the review popup.
 
+## Tray Behavior
+
+PrivacyTextAssistant runs as a background utility with a system tray menu:
+
+- Open: show the main window.
+- Settings: show the API key/settings view.
+- Hide: hide the window and keep the shortcut active.
+- Quit: exit the app.
+
+Closing the window hides it to the tray instead of terminating the app.
+
 ## Troubleshooting
 
 - If `Ctrl+Space` does nothing, another application may already own that shortcut.
 - If no popup result appears, make sure text is highlighted before pressing the shortcut.
 - If OpenAI calls fail, replace the API key from the settings area or check `OPENAI_API_KEY`.
+- Use the Test API key button to verify authentication without sending selected text.
+- Use the Test model button to verify the selected model is available to the current API key.
 - If paste fails, the original application window may have closed, lost focus eligibility, or blocked simulated paste.
 - If clipboard restoration is imperfect, see `IMPLEMENTATION_NOTES.md` for clipboard format limitations.
 
@@ -90,4 +119,4 @@ When pressed, the backend captures the foreground window, snapshots the text cli
 - Clipboard preservation currently restores text clipboard contents only.
 - Windows foreground focus rules can occasionally prevent refocusing another app.
 - Some applications block synthetic `Ctrl+C` or `Ctrl+V`.
-- The app uses the explicitly requested `gpt-4o-mini` model.
+- Model availability depends on the current API account and is checked only when testing a model or making a request.

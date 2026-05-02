@@ -28,6 +28,10 @@ pub enum AppError {
     EmptyApiResponse,
     #[error("The API key could not be saved securely.")]
     SecureStore,
+    #[error("The selected OpenAI model is unavailable or invalid. Please choose another model in Settings.")]
+    ModelUnavailable,
+    #[error("Model settings could not be saved or loaded.")]
+    Settings,
     #[error("The application window could not be shown.")]
     Window,
 }
@@ -37,19 +41,29 @@ impl AppError {
         match self {
             AppError::EmptySelection => "No text was selected or copied.",
             AppError::MissingApiKey => "OpenAI API key is missing.",
-            AppError::Authentication => "OpenAI authentication failed. Please replace your API key.",
+            AppError::Authentication => {
+                "OpenAI authentication failed. Please replace your API key."
+            }
             AppError::RateLimited => "OpenAI rate limit reached. Please try again later.",
             AppError::Network => "Network request failed. Check your connection.",
             AppError::Timeout => "OpenAI request timed out. Please try again.",
-            AppError::TargetWindowUnavailable => "The original application window is no longer available.",
+            AppError::TargetWindowUnavailable => {
+                "The original application window is no longer available."
+            }
             AppError::ClipboardUnavailable => {
                 "Clipboard access failed. Another application may be locking the clipboard."
             }
-            AppError::ShortcutRegistration => "Shortcut registration failed. Ctrl+Space may already be in use.",
+            AppError::ShortcutRegistration => {
+                "Shortcut registration failed. Ctrl+Space may already be in use."
+            }
             AppError::OperationAlreadyActive => "A writing operation is already in progress.",
             AppError::OperationNotFound => "The requested writing operation is no longer active.",
             AppError::EmptyApiResponse => "OpenAI returned an empty response.",
             AppError::SecureStore => "The API key could not be saved securely.",
+            AppError::ModelUnavailable => {
+                "The selected OpenAI model is unavailable or invalid. Please choose another model in Settings."
+            }
+            AppError::Settings => "Model settings could not be saved or loaded.",
             AppError::Window => "The application window could not be shown.",
         }
     }
@@ -76,6 +90,8 @@ mod tests {
             AppError::Authentication.user_message(),
             "OpenAI authentication failed. Please replace your API key."
         );
-        assert!(!AppError::ClipboardUnavailable.user_message().contains("clipboard contents"));
+        assert!(!AppError::ClipboardUnavailable
+            .user_message()
+            .contains("clipboard contents"));
     }
 }

@@ -7,6 +7,7 @@ import { buildDiffTokens, reconstructText, toggleToken } from "./lib/diffTokens"
 import { Popup } from "./components/Popup";
 import type { OperationErrorPayload, OperationStartedPayload } from "./types/tauri";
 import type { OperationState, SectionKind, TransformSectionState } from "./types/diff";
+import type { ModelPreset, ModelSettings } from "./types/model";
 
 type Action =
   | {
@@ -51,6 +52,7 @@ type Action =
 const initialState: OperationState = {
   operationId: null,
   originalText: "",
+  model: "gpt-5-nano",
   targetCaptured: false,
   correction: emptySection("correction"),
   rephrase: emptySection("rephrase")
@@ -73,6 +75,7 @@ function reducer(state: OperationState, action: Action): OperationState {
       return {
         operationId: action.payload.operationId,
         originalText: action.payload.originalText,
+        model: action.payload.model,
         targetCaptured: action.payload.targetCaptured,
         correction: {
           ...emptySection("correction"),
@@ -85,7 +88,8 @@ function reducer(state: OperationState, action: Action): OperationState {
           status: "loading",
           originalText: action.payload.originalText,
           requestId: action.rephraseRequestId
-        }
+        },
+        operationError: undefined
       };
 
     case "operation-error":
@@ -104,6 +108,8 @@ function reducer(state: OperationState, action: Action): OperationState {
           ...state[action.section],
           status: "loading",
           errorMessage: undefined,
+          candidateText: "",
+          tokens: [],
           requestId: action.requestId
         }
       };
@@ -138,7 +144,9 @@ function reducer(state: OperationState, action: Action): OperationState {
         [action.section]: {
           ...state[action.section],
           status: "error",
-          errorMessage: action.message
+          errorMessage: action.message,
+          candidateText: "",
+          tokens: []
         }
       };
 
@@ -163,13 +171,35 @@ export default function App() {
   const [state, dispatch] = useReducer(reducer, initialState);
   const [hasApiKey, setHasApiKey] = useState(false);
   const [savingKey, setSavingKey] = useState(false);
+  const [testingKey, setTestingKey] = useState(false);
   const [keyError, setKeyError] = useState<string>();
+  const [keyTestMessage, setKeyTestMessage] = useState<string>();
+  const [settingsMode, setSettingsMode] = useState(false);
+  const [modelSettingsMode, setModelSettingsMode] = useState(false);
+  const [modelSettings, setModelSettings] = useState<ModelSettings>({
+    selected_model: "gpt-5-nano",
+    temperature: 1.0
+  });
+  const [modelPresets, setModelPresets] = useState<ModelPreset[]>([]);
+  const [savingModel, setSavingModel] = useState(false);
+  const [testingModel, setTestingModel] = useState(false);
+  const [modelError, setModelError] = useState<string>();
+  const [modelMessage, setModelMessage] = useState<string>();
   const requestCounter = useRef(0);
 
   useEffect(() => {
-    void invoke<boolean>("has_api_key")
-      .then(setHasApiKey)
-      .catch(() => setHasApiKey(false));
+    void refreshApiKeyStatus().then((configured) => {
+      setSettingsMode(!configured);
+    });
+    void refreshModelSettings().catch(() => {
+      setModelSettings({
+        selected_model: "gpt-5-nano",
+        temperature: 1.0
+      });
+    });
+    void invoke<ModelPreset[]>("get_model_presets")
+      .then(setModelPresets)
+      .catch(() => setModelPresets([]));
   }, []);
 
   useEffect(() => {
@@ -189,14 +219,16 @@ export default function App() {
         event.payload.operationId,
         event.payload.originalText,
         correctionRequestId,
-        dispatch
+        dispatch,
+        handleTransformConfigurationError
       );
       void runTransform(
         "rephrase",
         event.payload.operationId,
         event.payload.originalText,
         rephraseRequestId,
-        dispatch
+        dispatch,
+        handleTransformConfigurationError
       );
     });
 
@@ -204,9 +236,28 @@ export default function App() {
       dispatch({ type: "operation-error", message: event.payload.message });
     });
 
+    const unlistenSettings = listen("show-settings", () => {
+      setSettingsMode(true);
+      setModelSettingsMode(true);
+    });
+
     return () => {
       void unlistenStarted.then((unlisten) => unlisten());
       void unlistenError.then((unlisten) => unlisten());
+      void unlistenSettings.then((unlisten) => unlisten());
+    };
+  }, []);
+
+  useEffect(() => {
+    const appWindow = getCurrentWindow();
+    const unlistenResized = appWindow.onResized(async () => {
+      if (await appWindow.isMinimized()) {
+        await invoke("hide_to_tray");
+      }
+    });
+
+    return () => {
+      void unlistenResized.then((unlisten) => unlisten());
     };
   }, []);
 
@@ -225,13 +276,73 @@ export default function App() {
   async function handleSaveKey(apiKey: string) {
     setSavingKey(true);
     setKeyError(undefined);
+    setKeyTestMessage(undefined);
     try {
       await invoke("set_api_key", { apiKey });
-      setHasApiKey(true);
+      const configured = await refreshApiKeyStatus();
+      if (!configured) {
+        throw new Error("OpenAI API key is missing.");
+      }
+      setSettingsMode(false);
     } catch (error) {
+      setHasApiKey(false);
+      setSettingsMode(true);
       setKeyError(errorMessage(error));
     } finally {
       setSavingKey(false);
+    }
+  }
+
+  async function handleTestKey() {
+    setTestingKey(true);
+    setKeyError(undefined);
+    setKeyTestMessage(undefined);
+    try {
+      await invoke("test_api_key");
+      await refreshApiKeyStatus();
+      setKeyTestMessage("API key test succeeded.");
+    } catch (error) {
+      const message = errorMessage(error);
+      setKeyError(message);
+      setKeyTestMessage(undefined);
+      setSettingsMode(true);
+      if (message === "OpenAI API key is missing.") {
+        setHasApiKey(false);
+      }
+    } finally {
+      setTestingKey(false);
+    }
+  }
+
+  async function handleSaveModel(nextSettings: ModelSettings) {
+    setSavingModel(true);
+    setModelError(undefined);
+    setModelMessage(undefined);
+    try {
+      await invoke("set_model_settings", { settings: nextSettings });
+      const confirmed = await refreshModelSettings();
+      setModelMessage(`Model settings saved: ${confirmed.selected_model}`);
+      setModelSettingsMode(false);
+    } catch (error) {
+      setModelError(errorMessage(error));
+      setModelSettingsMode(true);
+    } finally {
+      setSavingModel(false);
+    }
+  }
+
+  async function handleTestStoredModel() {
+    setTestingModel(true);
+    setModelError(undefined);
+    setModelMessage(undefined);
+    try {
+      await invoke("test_selected_model");
+      setModelMessage("Model test successful.");
+    } catch (error) {
+      setModelError(errorMessage(error));
+      setModelSettingsMode(true);
+    } finally {
+      setTestingModel(false);
     }
   }
 
@@ -246,7 +357,7 @@ export default function App() {
       return;
     }
 
-    await getCurrentWindow().hide();
+    await invoke("hide_to_tray");
   }
 
   function handleRetryRephrase() {
@@ -262,7 +373,14 @@ export default function App() {
       section: "rephrase",
       requestId
     });
-    void runTransform("rephrase", operationId, state.originalText, requestId, dispatch);
+    void runTransform(
+      "rephrase",
+      operationId,
+      state.originalText,
+      requestId,
+      dispatch,
+      handleTransformConfigurationError
+    );
   }
 
   async function handleApply(section: SectionKind) {
@@ -287,14 +405,59 @@ export default function App() {
       state={state}
       hasApiKey={hasApiKey}
       savingKey={savingKey}
+      testingKey={testingKey}
       keyError={keyError}
+      keyTestMessage={keyTestMessage}
+      settingsMode={settingsMode}
+      modelSettingsMode={modelSettingsMode}
+      modelSettings={modelSettings}
+      modelPresets={modelPresets}
+      savingModel={savingModel}
+      testingModel={testingModel}
+      modelError={modelError}
+      modelMessage={modelMessage}
       onSaveKey={handleSaveKey}
+      onTestKey={handleTestKey}
+      onShowSettings={() => setSettingsMode(true)}
+      onShowModelSettings={() => setModelSettingsMode(true)}
+      onSaveModel={handleSaveModel}
+      onTestStoredModel={handleTestStoredModel}
+      onHideToTray={() => void invoke("hide_to_tray")}
+      onQuit={() => void invoke("quit_app")}
       onClose={handleClose}
       onTokenClick={(section, tokenId) => dispatch({ type: "toggle-token", section, tokenId })}
       onApply={handleApply}
       onRetryRephrase={handleRetryRephrase}
     />
   );
+
+  async function refreshApiKeyStatus() {
+    try {
+      const configured = await invoke<boolean>("has_api_key");
+      setHasApiKey(configured);
+      return configured;
+    } catch {
+      setHasApiKey(false);
+      return false;
+    }
+  }
+
+  async function refreshModelSettings() {
+    const settings = await invoke<ModelSettings>("get_model_settings");
+    setModelSettings(settings);
+    return settings;
+  }
+
+  function handleTransformConfigurationError(message: string) {
+    if (message === "OpenAI API key is missing.") {
+      void refreshApiKeyStatus();
+      setSettingsMode(true);
+    }
+    if (message === "The selected OpenAI model is unavailable or invalid. Please choose another model in Settings.") {
+      setModelError(message);
+      setModelSettingsMode(true);
+    }
+  }
 }
 
 async function runTransform(
@@ -302,7 +465,8 @@ async function runTransform(
   operationId: string,
   originalText: string,
   requestId: number,
-  dispatch: Dispatch<Action>
+  dispatch: Dispatch<Action>,
+  onConfigurationError: (message: string) => void
 ) {
   const command = section === "correction" ? "run_correction" : "run_rephrase";
 
@@ -319,12 +483,14 @@ async function runTransform(
       candidateText
     });
   } catch (error) {
+    const message = errorMessage(error);
+    onConfigurationError(message);
     dispatch({
       type: "section-error",
       operationId,
       section,
       requestId,
-      message: errorMessage(error)
+      message
     });
   }
 }

@@ -28,7 +28,7 @@ fn capture_foreground_window_impl() -> AppResult<CapturedTargetWindow> {
     use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
 
     let hwnd = unsafe { GetForegroundWindow() };
-    if hwnd.0.is_null() {
+    if hwnd.0 == 0 {
         return Err(AppError::TargetWindowUnavailable);
     }
 
@@ -46,11 +46,11 @@ fn capture_foreground_window_impl() -> AppResult<CapturedTargetWindow> {
 #[cfg(target_os = "windows")]
 fn focus_window_impl(target: CapturedTargetWindow) -> AppResult<()> {
     use windows::Win32::Foundation::HWND;
-    use windows::Win32::UI::WindowsAndMessaging::{IsIconic, IsWindow, SetForegroundWindow, ShowWindow, SW_RESTORE};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        IsIconic, IsWindow, SetForegroundWindow, ShowWindow, SW_RESTORE,
+    };
 
-    use std::ffi::c_void;
-
-    let hwnd = HWND(target.hwnd as *mut c_void);
+    let hwnd = HWND(target.hwnd as *mut _);
     if !unsafe { IsWindow(hwnd).as_bool() } {
         return Err(AppError::TargetWindowUnavailable);
     }

@@ -1,13 +1,14 @@
 use crate::errors::{AppError, AppResult};
+use crate::model_settings::{self, ModelSettings};
 use crate::secure_store;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{json, Value};
 use std::time::Duration;
+use tauri::AppHandle;
 
 const OPENAI_RESPONSES_URL: &str = "https://api.openai.com/v1/responses";
-const MODEL: &str = "gpt-4o-mini";
-const TEMPERATURE: f32 = 1.0;
+const OPENAI_MODELS_URL: &str = "https://api.openai.com/v1/models";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TransformType {
@@ -40,49 +41,24 @@ pub fn build_prompt(original_text: &str, transform_type: TransformType) -> Promp
     }
 }
 
-pub async fn call_openai_correction(original_text: String) -> AppResult<String> {
-    call_openai_text_transform(original_text, TransformType::Correction).await
+pub async fn call_openai_correction(app: AppHandle, original_text: String) -> AppResult<String> {
+    call_openai_text_transform(&app, original_text, TransformType::Correction).await
 }
 
-pub async fn call_openai_rephrase(original_text: String) -> AppResult<String> {
-    call_openai_text_transform(original_text, TransformType::Rephrase).await
+pub async fn call_openai_rephrase(app: AppHandle, original_text: String) -> AppResult<String> {
+    call_openai_text_transform(&app, original_text, TransformType::Rephrase).await
 }
 
-async fn call_openai_text_transform(
-    original_text: String,
-    transform_type: TransformType,
-) -> AppResult<String> {
+pub async fn test_api_key() -> AppResult<()> {
     let api_key = secure_store::get_api_key()?;
-    let prompt = build_prompt(&original_text, transform_type);
-    call_openai_text_transform_with_client(
-        &reqwest::Client::builder()
-            .timeout(Duration::from_secs(30))
-            .build()
-            .map_err(|_| AppError::Network)?,
-        OPENAI_RESPONSES_URL,
-        &api_key,
-        prompt,
-    )
-    .await
-}
-
-async fn call_openai_text_transform_with_client(
-    client: &reqwest::Client,
-    url: &str,
-    api_key: &str,
-    prompt: PromptParts,
-) -> AppResult<String> {
-    let body = json!({
-        "model": MODEL,
-        "temperature": TEMPERATURE,
-        "instructions": prompt.system,
-        "input": prompt.user
-    });
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .map_err(|_| AppError::Network)?;
 
     let response = client
-        .post(url)
+        .get(OPENAI_MODELS_URL)
         .bearer_auth(api_key)
-        .json(&body)
         .send()
         .await
         .map_err(|err| {
@@ -93,19 +69,235 @@ async fn call_openai_text_transform_with_client(
             }
         })?;
 
+    map_status(response.status(), "")?;
+    Ok(())
+}
+
+pub async fn test_selected_model(app: AppHandle) -> AppResult<()> {
+    let settings = model_settings::get_model_settings(&app)?;
+    test_model_with_settings(settings).await
+}
+
+pub async fn test_model(model: String) -> AppResult<()> {
+    test_model_with_settings(ModelSettings {
+        selected_model: model,
+        temperature: 1.0,
+    })
+    .await
+}
+
+async fn test_model_with_settings(settings: ModelSettings) -> AppResult<()> {
+    let api_key = secure_store::get_api_key()?;
+    if settings.selected_model.trim().is_empty() {
+        return Err(AppError::ModelUnavailable);
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .build()
+        .map_err(|_| AppError::Network)?;
+
+    let body = build_test_body(&settings, true);
+    let response = send_openai_request(&client, OPENAI_RESPONSES_URL, &api_key, &body).await?;
+    handle_empty_response_or_retry_without_temperature(
+        &client,
+        OPENAI_RESPONSES_URL,
+        &api_key,
+        response,
+        || build_test_body(&settings, false),
+    )
+    .await
+}
+
+async fn call_openai_text_transform(
+    app: &AppHandle,
+    original_text: String,
+    transform_type: TransformType,
+) -> AppResult<String> {
+    let api_key = secure_store::get_api_key()?;
+    let model_settings = model_settings::get_model_settings(app)?;
+    let prompt = build_prompt(&original_text, transform_type);
+    call_openai_text_transform_with_client(
+        &reqwest::Client::builder()
+            .timeout(Duration::from_secs(30))
+            .build()
+            .map_err(|_| AppError::Network)?,
+        OPENAI_RESPONSES_URL,
+        &api_key,
+        &model_settings,
+        prompt,
+    )
+    .await
+}
+
+async fn call_openai_text_transform_with_client(
+    client: &reqwest::Client,
+    url: &str,
+    api_key: &str,
+    model_settings: &ModelSettings,
+    prompt: PromptParts,
+) -> AppResult<String> {
+    let body = build_transform_body(model_settings, &prompt, true);
+    let response = send_openai_request(client, url, api_key, &body).await?;
+    handle_text_response_or_retry_without_temperature(client, url, api_key, response, || {
+        build_transform_body(model_settings, &prompt, false)
+    })
+    .await
+}
+
+async fn send_openai_request(
+    client: &reqwest::Client,
+    url: &str,
+    api_key: &str,
+    body: &Value,
+) -> AppResult<reqwest::Response> {
+    client
+        .post(url)
+        .bearer_auth(api_key)
+        .json(body)
+        .send()
+        .await
+        .map_err(|err| {
+            if err.is_timeout() {
+                AppError::Timeout
+            } else {
+                AppError::Network
+            }
+        })
+}
+
+async fn handle_text_response_or_retry_without_temperature<F>(
+    client: &reqwest::Client,
+    url: &str,
+    api_key: &str,
+    response: reqwest::Response,
+    retry_body: F,
+) -> AppResult<String>
+where
+    F: FnOnce() -> Value,
+{
     let status = response.status();
+    if status.is_success() {
+        let parsed: OpenAiResponse = response.json().await.map_err(|_| AppError::Network)?;
+        return parsed.output_text().ok_or(AppError::EmptyApiResponse);
+    }
+
+    let body = response.text().await.unwrap_or_default();
+    if status == StatusCode::BAD_REQUEST && is_temperature_unsupported_error(&body) {
+        let retry = send_openai_request(client, url, api_key, &retry_body()).await?;
+        let retry_status = retry.status();
+        if retry_status.is_success() {
+            let parsed: OpenAiResponse = retry.json().await.map_err(|_| AppError::Network)?;
+            return parsed.output_text().ok_or(AppError::EmptyApiResponse);
+        }
+        let retry_body = retry.text().await.unwrap_or_default();
+        map_status(retry_status, &retry_body)?;
+        return Err(AppError::Network);
+    }
+
+    map_status(status, &body)?;
+    Err(AppError::Network)
+}
+
+async fn handle_empty_response_or_retry_without_temperature<F>(
+    client: &reqwest::Client,
+    url: &str,
+    api_key: &str,
+    response: reqwest::Response,
+    retry_body: F,
+) -> AppResult<()>
+where
+    F: FnOnce() -> Value,
+{
+    let status = response.status();
+    if status.is_success() {
+        return Ok(());
+    }
+
+    let body = response.text().await.unwrap_or_default();
+    if status == StatusCode::BAD_REQUEST && is_temperature_unsupported_error(&body) {
+        let retry = send_openai_request(client, url, api_key, &retry_body()).await?;
+        let retry_status = retry.status();
+        if retry_status.is_success() {
+            return Ok(());
+        }
+        let retry_body = retry.text().await.unwrap_or_default();
+        return map_status(retry_status, &retry_body);
+    }
+
+    map_status(status, &body)
+}
+
+fn build_transform_body(
+    model_settings: &ModelSettings,
+    prompt: &PromptParts,
+    include_temperature: bool,
+) -> Value {
+    let mut body = json!({
+        "model": model_settings.selected_model.as_str(),
+        "instructions": prompt.system,
+        "input": prompt.user
+    });
+
+    if include_temperature {
+        body["temperature"] = json!(model_settings.temperature);
+    }
+
+    body
+}
+
+fn build_test_body(model_settings: &ModelSettings, include_temperature: bool) -> Value {
+    let mut body = json!({
+        "model": model_settings.selected_model.trim(),
+        "input": "Return only the word OK.",
+        "max_output_tokens": 10
+    });
+
+    if include_temperature {
+        body["temperature"] = json!(model_settings.temperature);
+    }
+
+    body
+}
+
+fn map_status(status: StatusCode, body: &str) -> AppResult<()> {
     if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
         return Err(AppError::Authentication);
     }
     if status == StatusCode::TOO_MANY_REQUESTS {
         return Err(AppError::RateLimited);
     }
+    if status == StatusCode::BAD_REQUEST
+        || status == StatusCode::NOT_FOUND
+        || is_model_unavailable_error(body)
+    {
+        return Err(AppError::ModelUnavailable);
+    }
     if !status.is_success() {
         return Err(AppError::Network);
     }
 
-    let parsed: OpenAiResponse = response.json().await.map_err(|_| AppError::Network)?;
-    parsed.output_text().ok_or(AppError::EmptyApiResponse)
+    Ok(())
+}
+
+fn is_temperature_unsupported_error(body: &str) -> bool {
+    let lower = body.to_ascii_lowercase();
+    lower.contains("temperature")
+        && (lower.contains("unsupported")
+            || lower.contains("not supported")
+            || lower.contains("unknown parameter")
+            || lower.contains("unrecognized")
+            || lower.contains("invalid parameter"))
+}
+
+fn is_model_unavailable_error(body: &str) -> bool {
+    let lower = body.to_ascii_lowercase();
+    lower.contains("model")
+        && (lower.contains("not found")
+            || lower.contains("does not exist")
+            || lower.contains("invalid")
+            || lower.contains("unavailable")
+            || lower.contains("access"))
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -152,7 +344,8 @@ impl OpenAiResponse {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_prompt, TransformType, MODEL, TEMPERATURE};
+    use super::{build_prompt, TransformType};
+    use crate::model_settings::ModelSettings;
 
     #[test]
     fn correction_prompt_preserves_strict_scope() {
@@ -169,8 +362,9 @@ mod tests {
     }
 
     #[test]
-    fn model_and_temperature_match_product_requirement() {
-        assert_eq!(MODEL, "gpt-4o-mini");
-        assert_eq!(TEMPERATURE, 1.0);
+    fn default_model_and_temperature_match_product_requirement() {
+        let settings = ModelSettings::default();
+        assert_eq!(settings.selected_model, "gpt-5-nano");
+        assert_eq!(settings.temperature, 1.0);
     }
 }

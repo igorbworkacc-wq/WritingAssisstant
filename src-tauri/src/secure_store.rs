@@ -1,4 +1,5 @@
 use crate::errors::{AppError, AppResult};
+use keyring::Error as KeyringError;
 
 const SERVICE_NAME: &str = "PrivacyTextAssistant";
 const ACCOUNT_NAME: &str = "openai_api_key";
@@ -17,7 +18,10 @@ pub fn get_api_key() -> AppResult<String> {
 
     let stored = entry()?
         .get_password()
-        .map_err(|_| AppError::MissingApiKey)?
+        .map_err(|error| match error {
+            KeyringError::NoEntry => AppError::MissingApiKey,
+            _ => AppError::SecureStore,
+        })?
         .trim()
         .to_string();
 
@@ -28,8 +32,12 @@ pub fn get_api_key() -> AppResult<String> {
     }
 }
 
-pub fn has_api_key() -> bool {
-    get_api_key().is_ok()
+pub fn has_api_key() -> AppResult<bool> {
+    match get_api_key() {
+        Ok(_) => Ok(true),
+        Err(AppError::MissingApiKey) => Ok(false),
+        Err(error) => Err(error),
+    }
 }
 
 pub fn set_api_key(api_key: String) -> AppResult<()> {
@@ -40,5 +48,12 @@ pub fn set_api_key(api_key: String) -> AppResult<()> {
 
     entry()?
         .set_password(trimmed)
-        .map_err(|_| AppError::SecureStore)
+        .map_err(|_| AppError::SecureStore)?;
+
+    let retrieved = get_api_key()?;
+    if retrieved.is_empty() {
+        Err(AppError::MissingApiKey)
+    } else {
+        Ok(())
+    }
 }

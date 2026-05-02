@@ -19,7 +19,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -72,6 +73,14 @@ button {
   justify-content: space-between;
   color: #526071;
   font-size: 13px;
+  gap: 12px;
+}
+
+.settingsActions,
+.readyActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .settingsPanel {
@@ -94,11 +103,39 @@ button {
   font-size: 13px;
 }
 
-.settingsPanel input {
+.settingsPanel input,
+.settingsPanel select {
   width: 100%;
   border: 1px solid #c7d0da;
   border-radius: 6px;
   padding: 9px 10px;
+  background: #ffffff;
+}
+
+.fieldLabel {
+  display: grid;
+  gap: 6px;
+  color: #455466;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.modelDescription {
+  color: #5c6978;
+  font-size: 13px;
+}
+
+.advancedSettings {
+  border: 1px solid #e0e6ed;
+  border-radius: 6px;
+  padding: 9px 10px;
+}
+
+.advancedSettings summary {
+  cursor: pointer;
+  color: #455466;
+  font-weight: 600;
+  font-size: 13px;
 }
 
 .topError,
@@ -111,13 +148,50 @@ button {
   font-size: 13px;
 }
 
-.emptyState {
-  display: grid;
-  place-items: center;
+.successState {
+  color: #19613a;
+  background: #eefaf3;
+  border: 1px solid #b9e4c9;
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-size: 13px;
+}
+
+.readyPanel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
   min-height: 180px;
-  color: #637083;
   border: 1px dashed #c7d0da;
   border-radius: 8px;
+  padding: 22px;
+  background: #ffffff;
+}
+
+.readyPanel h2 {
+  margin: 0 0 6px;
+  font-size: 17px;
+}
+
+.readyPanel p {
+  margin: 0;
+  color: #637083;
+  font-size: 14px;
+}
+
+.statusMeta,
+.operationMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+  color: #455466;
+  font-size: 13px;
+}
+
+.operationMeta {
+  margin-top: -4px;
 }
 
 .originalPreview {
@@ -269,5 +343,11 @@ button {
 
   .sectionsGrid {
     grid-template-columns: 1fr;
+  }
+
+  .readyPanel,
+  .settingsInline {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }

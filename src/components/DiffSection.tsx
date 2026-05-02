@@ -18,7 +18,8 @@ export function DiffSection({
   onRetry,
   retryDisabled
 }: DiffSectionProps) {
-  const canApply = state.status === "ready" && state.tokens.length > 0;
+  const canApply =
+    state.status === "ready" && state.tokens.length > 0 && state.candidateText.length > 0;
 
   return (
     <section className="diffSection">

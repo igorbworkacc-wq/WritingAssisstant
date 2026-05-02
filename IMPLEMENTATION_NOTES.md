@@ -42,12 +42,31 @@ For development, `OPENAI_API_KEY` takes precedence if present.
 
 ## OpenAI API
 
-The Rust backend calls the OpenAI Responses API endpoint directly with:
-
-- model: `gpt-4o-mini`
-- temperature: `1.0`
+The Rust backend calls the OpenAI Responses API endpoint directly with the backend-selected model and configured temperature.
 
 The app sends text only to OpenAI and no other network service.
+
+The Test API key button calls `GET https://api.openai.com/v1/models`, which validates authentication without sending selected user text.
+
+## Model Selection
+
+Model selection is backend-controlled. Correction and rephrase commands load the selected model from Rust settings at request start; the frontend cannot override the model per request.
+
+The default model is `gpt-5-nano`. `gpt-4o-mini` remains as a fallback preset.
+
+The selected model is persisted as non-sensitive local app configuration in `model-settings.json` under the Tauri app config directory. `OPENAI_MODEL` is used only when no persisted user-selected model exists, and `gpt-5-nano` remains the built-in default.
+
+OpenAI model availability is validated only through the user-triggered test action or actual API calls. Pricing is not fetched automatically by the app.
+
+The app retries once without `temperature` if the selected model rejects the temperature parameter.
+
+## Tray And Window Behavior
+
+The app creates a Tauri system tray icon with Open, Settings, Hide, and Quit actions. The main window starts hidden when an API key is configured and opens directly to settings when no key is configured.
+
+The window is no longer permanently always-on-top. Closing the window hides it to the tray and keeps the global shortcut registered. The release executable uses the Windows GUI subsystem so it does not keep a console window open.
+
+The crate-level `windows_subsystem = "windows"` attribute is placed in `src-tauri/src/main.rs` so release executables use the Windows GUI subsystem and avoid opening a console window.
 
 ## Packaging For Corporate Use
 

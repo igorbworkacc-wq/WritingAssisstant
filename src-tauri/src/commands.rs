@@ -1,6 +1,7 @@
 use crate::clipboard::{self, ClipboardSnapshot};
 use crate::errors::{AppError, AppResult};
 use crate::keyboard;
+use crate::model_settings::{self, ModelPreset, ModelSettings};
 use crate::openai;
 use crate::secure_store;
 use crate::window_state::{self, CapturedTargetWindow};
@@ -34,6 +35,7 @@ struct OperationStartedPayload {
     operation_id: String,
     original_text: String,
     target_captured: bool,
+    model: String,
 }
 
 #[derive(Clone, Serialize)]
@@ -43,7 +45,7 @@ struct OperationErrorPayload {
 }
 
 #[tauri::command]
-pub fn has_api_key() -> bool {
+pub fn has_api_key() -> AppResult<bool> {
     secure_store::has_api_key()
 }
 
@@ -53,13 +55,51 @@ pub fn set_api_key(api_key: String) -> AppResult<()> {
 }
 
 #[tauri::command]
-pub async fn run_correction(_operation_id: String, original_text: String) -> AppResult<String> {
-    openai::call_openai_correction(original_text).await
+pub async fn test_api_key() -> AppResult<()> {
+    openai::test_api_key().await
 }
 
 #[tauri::command]
-pub async fn run_rephrase(_operation_id: String, original_text: String) -> AppResult<String> {
-    openai::call_openai_rephrase(original_text).await
+pub fn get_model_settings(app: AppHandle) -> AppResult<ModelSettings> {
+    model_settings::get_model_settings(&app)
+}
+
+#[tauri::command]
+pub fn set_model_settings(app: AppHandle, settings: ModelSettings) -> AppResult<()> {
+    model_settings::set_model_settings(&app, settings)
+}
+
+#[tauri::command]
+pub fn get_model_presets() -> AppResult<Vec<ModelPreset>> {
+    Ok(model_settings::get_model_presets())
+}
+
+#[tauri::command]
+pub async fn test_selected_model(app: AppHandle) -> AppResult<()> {
+    openai::test_selected_model(app).await
+}
+
+#[tauri::command]
+pub async fn test_model(model: String) -> AppResult<()> {
+    openai::test_model(model).await
+}
+
+#[tauri::command]
+pub async fn run_correction(
+    app: AppHandle,
+    _operation_id: String,
+    original_text: String,
+) -> AppResult<String> {
+    openai::call_openai_correction(app, original_text).await
+}
+
+#[tauri::command]
+pub async fn run_rephrase(
+    app: AppHandle,
+    _operation_id: String,
+    original_text: String,
+) -> AppResult<String> {
+    openai::call_openai_rephrase(app, original_text).await
 }
 
 #[tauri::command]
@@ -70,7 +110,10 @@ pub async fn apply_text(
     final_text: String,
 ) -> AppResult<()> {
     let operation = {
-        let guard = state.inner.lock().map_err(|_| AppError::OperationNotFound)?;
+        let guard = state
+            .inner
+            .lock()
+            .map_err(|_| AppError::OperationNotFound)?;
         guard
             .operations
             .get(&operation_id)
@@ -78,10 +121,18 @@ pub async fn apply_text(
             .ok_or(AppError::OperationNotFound)?
     };
 
-    paste_text_into_target(operation.target, final_text, operation.clipboard_snapshot.clone()).await?;
+    paste_text_into_target(
+        operation.target,
+        final_text,
+        operation.clipboard_snapshot.clone(),
+    )
+    .await?;
 
     {
-        let mut guard = state.inner.lock().map_err(|_| AppError::OperationNotFound)?;
+        let mut guard = state
+            .inner
+            .lock()
+            .map_err(|_| AppError::OperationNotFound)?;
         guard.operations.remove(&operation_id);
         if guard.active_operation_id.as_deref() == Some(operation_id.as_str()) {
             guard.active_operation_id = None;
@@ -99,7 +150,10 @@ pub fn cancel_operation(
     operation_id: String,
 ) -> AppResult<()> {
     let operation = {
-        let mut guard = state.inner.lock().map_err(|_| AppError::OperationNotFound)?;
+        let mut guard = state
+            .inner
+            .lock()
+            .map_err(|_| AppError::OperationNotFound)?;
         let operation = guard
             .operations
             .remove(&operation_id)
@@ -120,10 +174,33 @@ pub async fn start_manual_operation(app: AppHandle) -> AppResult<()> {
     handle_shortcut_trigger(app).await
 }
 
+#[tauri::command]
+pub fn show_main_window(app: AppHandle) -> AppResult<()> {
+    show_window(&app, false)
+}
+
+#[tauri::command]
+pub fn show_settings_window(app: AppHandle) -> AppResult<()> {
+    show_window(&app, true)
+}
+
+#[tauri::command]
+pub fn hide_to_tray(app: AppHandle) -> AppResult<()> {
+    hide_popup(&app)
+}
+
+#[tauri::command]
+pub fn quit_app(app: AppHandle) {
+    app.exit(0);
+}
+
 pub async fn handle_shortcut_trigger(app: AppHandle) -> AppResult<()> {
     let state = app.state::<AppState>();
     {
-        let guard = state.inner.lock().map_err(|_| AppError::OperationNotFound)?;
+        let guard = state
+            .inner
+            .lock()
+            .map_err(|_| AppError::OperationNotFound)?;
         if guard.active_operation_id.is_some() {
             show_popup(&app)?;
             return Ok(());
@@ -148,8 +225,12 @@ pub async fn handle_shortcut_trigger(app: AppHandle) -> AppResult<()> {
     }
 
     let operation_id = Uuid::new_v4().to_string();
+    let model = model_settings::get_model_settings(&app)?.selected_model;
     {
-        let mut guard = state.inner.lock().map_err(|_| AppError::OperationNotFound)?;
+        let mut guard = state
+            .inner
+            .lock()
+            .map_err(|_| AppError::OperationNotFound)?;
         guard.active_operation_id = Some(operation_id.clone());
         guard.operations.insert(
             operation_id.clone(),
@@ -166,6 +247,7 @@ pub async fn handle_shortcut_trigger(app: AppHandle) -> AppResult<()> {
             operation_id,
             original_text,
             target_captured: true,
+            model,
         },
     )
     .map_err(|_| AppError::Window)?;
@@ -179,7 +261,10 @@ pub async fn copy_selection_from_active_window(
     let snapshot = clipboard::snapshot_clipboard()?;
     window_state::focus_window(target)?;
 
-    let sentinel = format!("__PRIVACY_TEXT_ASSISTANT_COPY_SENTINEL_{}__", Uuid::new_v4());
+    let sentinel = format!(
+        "__PRIVACY_TEXT_ASSISTANT_COPY_SENTINEL_{}__",
+        Uuid::new_v4()
+    );
     clipboard::write_clipboard_text(sentinel.clone())?;
     tokio::time::sleep(Duration::from_millis(40)).await;
     keyboard::send_ctrl_c()?;
@@ -215,20 +300,26 @@ pub async fn paste_text_into_target(
 }
 
 fn show_popup(app: &AppHandle) -> AppResult<()> {
-    let window = app
-        .get_webview_window("main")
-        .ok_or(AppError::Window)?;
+    show_window(app, false)
+}
+
+pub fn show_window(app: &AppHandle, settings: bool) -> AppResult<()> {
+    let window = app.get_webview_window("main").ok_or(AppError::Window)?;
     window.center().map_err(|_| AppError::Window)?;
-    window.set_always_on_top(true).map_err(|_| AppError::Window)?;
+    window
+        .set_always_on_top(false)
+        .map_err(|_| AppError::Window)?;
+    let _ = window.unminimize();
     window.show().map_err(|_| AppError::Window)?;
     window.set_focus().map_err(|_| AppError::Window)?;
+    if settings {
+        let _ = app.emit("show-settings", ());
+    }
     Ok(())
 }
 
 fn hide_popup(app: &AppHandle) -> AppResult<()> {
-    let window = app
-        .get_webview_window("main")
-        .ok_or(AppError::Window)?;
+    let window = app.get_webview_window("main").ok_or(AppError::Window)?;
     window.hide().map_err(|_| AppError::Window)?;
     Ok(())
 }

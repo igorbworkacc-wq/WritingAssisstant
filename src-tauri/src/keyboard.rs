@@ -28,12 +28,7 @@ fn send_ctrl_key(key: char) -> AppResult<()> {
         keyboard_input(VK_CONTROL, true),
     ];
 
-    let sent = unsafe {
-        SendInput(
-            &mut inputs,
-            std::mem::size_of::<INPUT>() as i32,
-        )
-    };
+    let sent = unsafe { SendInput(&mut inputs, std::mem::size_of::<INPUT>() as i32) };
 
     if sent == inputs.len() as u32 {
         Ok(())
@@ -43,7 +38,10 @@ fn send_ctrl_key(key: char) -> AppResult<()> {
 }
 
 #[cfg(target_os = "windows")]
-fn keyboard_input(key: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY, up: bool) -> windows::Win32::UI::Input::KeyboardAndMouse::INPUT {
+fn keyboard_input(
+    key: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY,
+    up: bool,
+) -> windows::Win32::UI::Input::KeyboardAndMouse::INPUT {
     use windows::Win32::UI::Input::KeyboardAndMouse::{
         INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP,
     };
@@ -54,7 +52,11 @@ fn keyboard_input(key: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY,
             ki: KEYBDINPUT {
                 wVk: key,
                 wScan: 0,
-                dwFlags: if up { KEYEVENTF_KEYUP } else { Default::default() },
+                dwFlags: if up {
+                    KEYEVENTF_KEYUP
+                } else {
+                    Default::default()
+                },
                 time: 0,
                 dwExtraInfo: 0,
             },
