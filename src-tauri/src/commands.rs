@@ -3,7 +3,7 @@ use crate::errors::{AppError, AppResult};
 use crate::keyboard;
 use crate::model_settings::{self, ModelPreset, ModelSettings};
 use crate::openai;
-use crate::secure_store;
+use crate::secure_store::{self, ApiKeyStatus};
 use crate::window_state::{self, CapturedTargetWindow};
 use serde::Serialize;
 use std::collections::HashMap;
@@ -57,6 +57,11 @@ pub fn set_api_key(api_key: String) -> AppResult<()> {
 #[tauri::command]
 pub async fn test_api_key() -> AppResult<()> {
     openai::test_api_key().await
+}
+
+#[tauri::command]
+pub fn get_api_key_status() -> AppResult<ApiKeyStatus> {
+    secure_store::get_api_key_status()
 }
 
 #[tauri::command]

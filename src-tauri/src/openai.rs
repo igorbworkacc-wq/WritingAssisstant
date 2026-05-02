@@ -8,7 +8,6 @@ use std::time::Duration;
 use tauri::AppHandle;
 
 const OPENAI_RESPONSES_URL: &str = "https://api.openai.com/v1/responses";
-const OPENAI_MODELS_URL: &str = "https://api.openai.com/v1/models";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TransformType {
@@ -56,21 +55,17 @@ pub async fn test_api_key() -> AppResult<()> {
         .build()
         .map_err(|_| AppError::Network)?;
 
-    let response = client
-        .get(OPENAI_MODELS_URL)
-        .bearer_auth(api_key)
-        .send()
-        .await
-        .map_err(|err| {
-            if err.is_timeout() {
-                AppError::Timeout
-            } else {
-                AppError::Network
-            }
-        })?;
-
-    map_status(response.status(), "")?;
-    Ok(())
+    let settings = ModelSettings::default();
+    let body = build_test_body(&settings, true);
+    let response = send_openai_request(&client, OPENAI_RESPONSES_URL, &api_key, &body).await?;
+    handle_empty_response_or_retry_without_temperature(
+        &client,
+        OPENAI_RESPONSES_URL,
+        &api_key,
+        response,
+        || build_test_body(&settings, false),
+    )
+    .await
 }
 
 pub async fn test_selected_model(app: AppHandle) -> AppResult<()> {

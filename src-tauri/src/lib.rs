@@ -17,6 +17,7 @@ pub fn run() {
             commands::has_api_key,
             commands::set_api_key,
             commands::test_api_key,
+            commands::get_api_key_status,
             commands::get_model_settings,
             commands::set_model_settings,
             commands::get_model_presets,

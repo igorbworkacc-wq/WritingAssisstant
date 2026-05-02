@@ -277,17 +277,28 @@ export default function App() {
     setSavingKey(true);
     setKeyError(undefined);
     setKeyTestMessage(undefined);
+    const trimmedKey = apiKey.trim();
+    if (!trimmedKey) {
+      setKeyError("OpenAI API key is missing.");
+      setSavingKey(false);
+      return false;
+    }
+
     try {
-      await invoke("set_api_key", { apiKey });
+      await invoke("set_api_key", { apiKey: trimmedKey });
       const configured = await refreshApiKeyStatus();
       if (!configured) {
         throw new Error("OpenAI API key is missing.");
       }
+      setKeyError(undefined);
+      setKeyTestMessage("API key configured. Click Test API key to verify access.");
       setSettingsMode(false);
+      return true;
     } catch (error) {
       setHasApiKey(false);
       setSettingsMode(true);
       setKeyError(errorMessage(error));
+      return false;
     } finally {
       setSavingKey(false);
     }
@@ -300,7 +311,7 @@ export default function App() {
     try {
       await invoke("test_api_key");
       await refreshApiKeyStatus();
-      setKeyTestMessage("API key test succeeded.");
+      setKeyTestMessage("API key configured and verified.");
     } catch (error) {
       const message = errorMessage(error);
       setKeyError(message);

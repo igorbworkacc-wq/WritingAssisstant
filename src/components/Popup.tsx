@@ -19,7 +19,7 @@ interface PopupProps {
   testingModel: boolean;
   modelError?: string;
   modelMessage?: string;
-  onSaveKey: (apiKey: string) => Promise<void>;
+  onSaveKey: (apiKey: string) => Promise<boolean>;
   onTestKey: () => Promise<void>;
   onShowSettings: () => void;
   onShowModelSettings: () => void;
