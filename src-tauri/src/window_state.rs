@@ -28,7 +28,7 @@ fn capture_foreground_window_impl() -> AppResult<CapturedTargetWindow> {
     use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
 
     let hwnd = unsafe { GetForegroundWindow() };
-    if hwnd.0 == 0 {
+    if hwnd.0.is_null() {
         return Err(AppError::TargetWindowUnavailable);
     }
 
