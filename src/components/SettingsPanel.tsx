@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 
 interface SettingsPanelProps {
   configured: boolean;
@@ -26,6 +26,7 @@ export function SettingsPanel({
   const [showForm, setShowForm] = useState(forceOpen || !configured);
   const [apiKey, setApiKey] = useState("");
   const [localError, setLocalError] = useState<string>();
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (forceOpen || !configured) {
@@ -34,6 +35,12 @@ export function SettingsPanel({
       setShowForm(false);
     }
   }, [configured, forceOpen]);
+
+  useEffect(() => {
+    if (showForm) {
+      inputRef.current?.focus();
+    }
+  }, [showForm]);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -74,8 +81,11 @@ export function SettingsPanel({
         Windows credential storage and is never stored in frontend storage.
       </p>
       <input
+        ref={inputRef}
         type="password"
         autoComplete="off"
+        disabled={saving}
+        onPaste={() => undefined}
         spellCheck={false}
         value={apiKey}
         onChange={(event) => setApiKey(event.target.value)}

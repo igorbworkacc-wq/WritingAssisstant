@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import type { ModelPreset, ModelSettings } from "../types/model";
 
 const CUSTOM_MODEL = "custom";
+const FALLBACK_MODEL = "gpt-4o-mini";
 
 interface ModelSettingsPanelProps {
   settings: ModelSettings;
@@ -64,6 +65,11 @@ export function ModelSettingsPanel({
       selected_model: modelToSave,
       temperature: parsedTemperature
     });
+  }
+
+  function useFallbackModel() {
+    setSelectedOption(FALLBACK_MODEL);
+    setCustomModel("");
   }
 
   if (!open) {
@@ -156,6 +162,9 @@ export function ModelSettingsPanel({
           disabled={!apiKeyConfigured || testing || modelToSave.length === 0}
         >
           Test selected model
+        </button>
+        <button type="button" className="secondaryButton" onClick={useFallbackModel}>
+          Use GPT-4o mini
         </button>
       </div>
     </form>

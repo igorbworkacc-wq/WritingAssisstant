@@ -263,6 +263,10 @@ export default function App() {
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
+      if (isEditableTarget(event.target)) {
+        return;
+      }
+
       if (event.key === "Escape") {
         event.preventDefault();
         void handleClose();
@@ -350,7 +354,12 @@ export default function App() {
       await invoke("test_selected_model");
       setModelMessage("Model test successful.");
     } catch (error) {
-      setModelError(errorMessage(error));
+      const message = errorMessage(error);
+      setModelError(
+        message === "The selected OpenAI model is unavailable or invalid. Please choose another model in Settings."
+          ? "The selected model is not available for this API key. Try GPT-5 mini or GPT-4o mini, or enter a custom model ID."
+          : message
+      );
       setModelSettingsMode(true);
     } finally {
       setTestingModel(false);
@@ -513,4 +522,14 @@ function nextRequestId(counter: MutableRefObject<number>) {
 
 function errorMessage(error: unknown) {
   return typeof error === "string" ? error : "Something went wrong. Please try again.";
+}
+
+function isEditableTarget(target: EventTarget | null) {
+  const element = target as HTMLElement | null;
+  if (!element) {
+    return false;
+  }
+
+  const tagName = element.tagName?.toLowerCase();
+  return tagName === "input" || tagName === "textarea" || tagName === "select" || element.isContentEditable;
 }

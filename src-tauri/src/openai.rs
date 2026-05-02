@@ -8,6 +8,7 @@ use std::time::Duration;
 use tauri::AppHandle;
 
 const OPENAI_RESPONSES_URL: &str = "https://api.openai.com/v1/responses";
+const OPENAI_MODELS_URL: &str = "https://api.openai.com/v1/models";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TransformType {
@@ -55,17 +56,14 @@ pub async fn test_api_key() -> AppResult<()> {
         .build()
         .map_err(|_| AppError::Network)?;
 
-    let settings = ModelSettings::default();
-    let body = build_test_body(&settings, true);
-    let response = send_openai_request(&client, OPENAI_RESPONSES_URL, &api_key, &body).await?;
-    handle_empty_response_or_retry_without_temperature(
-        &client,
-        OPENAI_RESPONSES_URL,
-        &api_key,
-        response,
-        || build_test_body(&settings, false),
-    )
-    .await
+    let response = client
+        .get(OPENAI_MODELS_URL)
+        .bearer_auth(api_key)
+        .send()
+        .await
+        .map_err(|_| AppError::Network)?;
+
+    map_api_key_status(response.status())
 }
 
 pub async fn test_selected_model(app: AppHandle) -> AppResult<()> {
@@ -273,6 +271,20 @@ fn map_status(status: StatusCode, body: &str) -> AppResult<()> {
     }
 
     Ok(())
+}
+
+fn map_api_key_status(status: StatusCode) -> AppResult<()> {
+    if status.is_success() {
+        return Ok(());
+    }
+    if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
+        return Err(AppError::Authentication);
+    }
+    if status == StatusCode::TOO_MANY_REQUESTS {
+        return Err(AppError::RateLimited);
+    }
+
+    Err(AppError::Network)
 }
 
 fn is_temperature_unsupported_error(body: &str) -> bool {
