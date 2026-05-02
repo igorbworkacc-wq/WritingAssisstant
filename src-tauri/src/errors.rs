@@ -36,7 +36,7 @@ pub enum AppError {
     RequestFormat,
     #[error("OpenAI returned an unexpected response format. Please update the app.")]
     UnexpectedResponseFormat,
-    #[error("Selected model rejected one of the request parameters. Retrying without optional parameters.")]
+    #[error("Selected model rejected an optional request parameter.")]
     UnsupportedParameter,
     #[error("Model settings could not be saved or loaded.")]
     Settings,
@@ -79,7 +79,7 @@ impl AppError {
                 "OpenAI returned an unexpected response format. Please update the app."
             }
             AppError::UnsupportedParameter => {
-                "Selected model rejected one of the request parameters. Retrying without optional parameters."
+                "Selected model rejected an optional request parameter."
             }
             AppError::Settings => "Model settings could not be saved or loaded.",
             AppError::Window => "The application window could not be shown.",

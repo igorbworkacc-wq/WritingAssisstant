@@ -22,17 +22,31 @@ pub struct PromptParts {
     pub user: String,
 }
 
+#[derive(Debug, Clone, Default)]
+struct ResponseOptions {
+    temperature: Option<f32>,
+    max_output_tokens: Option<u32>,
+}
+
+#[derive(Debug, Clone)]
+struct OpenAiSafeError {
+    user_message: String,
+    http_status: Option<u16>,
+    error_type: Option<String>,
+    error_code: Option<String>,
+}
+
 pub fn build_prompt(original_text: &str, transform_type: TransformType) -> PromptParts {
     match transform_type {
         TransformType::Correction => PromptParts {
-            system: "You are a strict grammar correction engine for corporate text. Your task is to correct only objective grammar, spelling, punctuation, and syntax errors. Preserve the writer's tone, formality, intent, sentence structure, and vocabulary unless a change is necessary for correctness. Do not explain anything. Return only the corrected text.",
+            system: "You are a strict grammar correction engine for corporate text. Correct only objective grammar, spelling, punctuation, and syntax errors. Preserve the writer's tone, formality, intent, sentence structure, and vocabulary unless a change is necessary for correctness. Return only the corrected text.",
             user: format!(
                 "Correct the following text. Return only the corrected text.\n\n<text>\n{}\n</text>",
                 original_text
             ),
         },
         TransformType::Rephrase => PromptParts {
-            system: "You are a professional corporate writing assistant. Rewrite text into clear, professional, B2-level English while preserving the original meaning, facts, and intent. Improve clarity, flow, and professionalism. Do not add facts. Do not remove important information. Do not explain anything. Return only the rewritten text.",
+            system: "You are a professional corporate writing assistant. Rewrite text into clear, professional, B2-level English while preserving the original meaning, facts, and intent. Improve clarity, flow, and professionalism. Do not add facts. Do not remove important information. Return only the rewritten text.",
             user: format!(
                 "Rephrase the following text into professional B2-level English. Return only the rewritten text.\n\n<text>\n{}\n</text>",
                 original_text
@@ -109,21 +123,15 @@ async fn test_model_with_settings(settings: ModelSettings) -> AppResult<()> {
         return Err(AppError::ModelNotAvailableForKey);
     }
 
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(20))
-        .build()
-        .map_err(|_| AppError::Network)?;
-
-    let body = build_test_body(&settings, true);
-    let response = send_openai_request(&client, OPENAI_RESPONSES_URL, &api_key, &body).await?;
-    handle_empty_response_or_retry_without_temperature(
-        &client,
-        OPENAI_RESPONSES_URL,
+    create_response_text(
         &api_key,
-        response,
-        || build_test_body(&settings, false),
+        selected_model,
+        "You are a minimal API test responder.",
+        "Return only the word OK.",
+        ResponseOptions::default(),
     )
     .await
+    .map(|_| ())
 }
 
 async fn list_available_models_with_key(api_key: &str) -> AppResult<Vec<String>> {
@@ -160,44 +168,37 @@ async fn call_openai_text_transform(
     let api_key = secure_store::get_api_key()?;
     let model_settings = model_settings::get_model_settings(app)?;
     let prompt = build_prompt(&original_text, transform_type);
-    call_openai_text_transform_with_client(
-        &reqwest::Client::builder()
-            .timeout(Duration::from_secs(30))
-            .build()
-            .map_err(|_| AppError::Network)?,
-        OPENAI_RESPONSES_URL,
+    create_response_text(
         &api_key,
-        &model_settings,
-        prompt,
+        model_settings.selected_model.trim(),
+        prompt.system,
+        &prompt.user,
+        ResponseOptions::default(),
     )
     .await
 }
 
-async fn call_openai_text_transform_with_client(
-    client: &reqwest::Client,
-    url: &str,
+async fn create_response_text(
     api_key: &str,
-    model_settings: &ModelSettings,
-    prompt: PromptParts,
+    model: &str,
+    instructions: &str,
+    input: &str,
+    options: ResponseOptions,
 ) -> AppResult<String> {
-    let body = build_transform_body(model_settings, &prompt, true);
-    let response = send_openai_request(client, url, api_key, &body).await?;
-    handle_text_response_or_retry_without_temperature(client, url, api_key, response, || {
-        build_transform_body(model_settings, &prompt, false)
-    })
-    .await
-}
+    if model.trim().is_empty() {
+        return Err(AppError::ModelNotAvailableForKey);
+    }
 
-async fn send_openai_request(
-    client: &reqwest::Client,
-    url: &str,
-    api_key: &str,
-    body: &Value,
-) -> AppResult<reqwest::Response> {
-    client
-        .post(url)
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|_| AppError::Network)?;
+
+    let body = build_response_body(model, instructions, input, &options);
+    let response = client
+        .post(OPENAI_RESPONSES_URL)
         .bearer_auth(api_key)
-        .json(body)
+        .json(&body)
         .send()
         .await
         .map_err(|err| {
@@ -206,19 +207,8 @@ async fn send_openai_request(
             } else {
                 AppError::Network
             }
-        })
-}
+        })?;
 
-async fn handle_text_response_or_retry_without_temperature<F>(
-    client: &reqwest::Client,
-    url: &str,
-    api_key: &str,
-    response: reqwest::Response,
-    retry_body: F,
-) -> AppResult<String>
-where
-    F: FnOnce() -> Value,
-{
     let status = response.status();
     if status.is_success() {
         let parsed: OpenAiResponse = response
@@ -231,107 +221,64 @@ where
     }
 
     let body = response.text().await.unwrap_or_default();
-    if status == StatusCode::BAD_REQUEST && is_temperature_unsupported_error(&body) {
-        let retry = send_openai_request(client, url, api_key, &retry_body()).await?;
-        let retry_status = retry.status();
-        if retry_status.is_success() {
-            let parsed: OpenAiResponse = retry
-                .json()
-                .await
-                .map_err(|_| AppError::UnexpectedResponseFormat)?;
-            return parsed
-                .output_text()
-                .ok_or(AppError::UnexpectedResponseFormat);
-        }
-        let retry_body = retry.text().await.unwrap_or_default();
-        map_status(retry_status, &retry_body)?;
-        return Err(AppError::Network);
-    }
-
-    map_status(status, &body)?;
-    Err(AppError::Network)
+    classify_openai_error(status, &body)
 }
 
-async fn handle_empty_response_or_retry_without_temperature<F>(
-    client: &reqwest::Client,
-    url: &str,
-    api_key: &str,
-    response: reqwest::Response,
-    retry_body: F,
-) -> AppResult<()>
-where
-    F: FnOnce() -> Value,
-{
-    let status = response.status();
-    if status.is_success() {
-        return Ok(());
-    }
-
-    let body = response.text().await.unwrap_or_default();
-    if status == StatusCode::BAD_REQUEST && is_temperature_unsupported_error(&body) {
-        let retry = send_openai_request(client, url, api_key, &retry_body()).await?;
-        let retry_status = retry.status();
-        if retry_status.is_success() {
-            return Ok(());
-        }
-        let retry_body = retry.text().await.unwrap_or_default();
-        return map_status(retry_status, &retry_body);
-    }
-
-    map_status(status, &body)
-}
-
-fn build_transform_body(
-    model_settings: &ModelSettings,
-    prompt: &PromptParts,
-    include_temperature: bool,
+fn build_response_body(
+    model: &str,
+    instructions: &str,
+    input: &str,
+    options: &ResponseOptions,
 ) -> Value {
     let mut body = json!({
-        "model": model_settings.selected_model.as_str(),
-        "instructions": prompt.system,
-        "input": prompt.user,
-        "max_output_tokens": 1000
+        "model": model.trim(),
+        "instructions": instructions,
+        "input": input
     });
 
-    if include_temperature {
-        body["temperature"] = json!(model_settings.temperature);
+    if let Some(temperature) = options.temperature {
+        body["temperature"] = json!(temperature);
+    }
+    if let Some(max_output_tokens) = options.max_output_tokens {
+        body["max_output_tokens"] = json!(max_output_tokens);
     }
 
     body
 }
 
-fn build_test_body(model_settings: &ModelSettings, include_temperature: bool) -> Value {
-    let mut body = json!({
-        "model": model_settings.selected_model.trim(),
-        "input": "Return only the word OK.",
-        "max_output_tokens": 10
-    });
-
-    if include_temperature {
-        body["temperature"] = json!(model_settings.temperature);
-    }
-
-    body
-}
-
-fn map_status(status: StatusCode, body: &str) -> AppResult<()> {
+fn classify_openai_error(status: StatusCode, body: &str) -> AppResult<String> {
     if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
         return Err(AppError::Authentication);
     }
     if status == StatusCode::TOO_MANY_REQUESTS {
         return Err(AppError::RateLimited);
     }
-    if is_model_unavailable_error(body) {
-        return Err(AppError::ModelUnavailable);
+
+    let safe_error = parse_openai_safe_error(status, body);
+    let _ = (
+        &safe_error.user_message,
+        safe_error.http_status,
+        &safe_error.error_type,
+        &safe_error.error_code,
+    );
+
+    if is_optional_parameter_error(&safe_error) {
+        return Err(AppError::UnsupportedParameter);
     }
-    if status == StatusCode::BAD_REQUEST || status == StatusCode::NOT_FOUND {
+    if is_model_unavailable_error(&safe_error) {
+        return Err(AppError::ModelNotAvailableForKey);
+    }
+    if status == StatusCode::BAD_REQUEST
+        || status == StatusCode::NOT_FOUND
+        || status.as_u16() == 422
+    {
         return Err(AppError::RequestFormat);
     }
     if !status.is_success() {
         return Err(AppError::Network);
     }
 
-    Ok(())
+    Err(AppError::Network)
 }
 
 fn map_api_key_status(status: StatusCode) -> AppResult<()> {
@@ -348,28 +295,56 @@ fn map_api_key_status(status: StatusCode) -> AppResult<()> {
     Err(AppError::Network)
 }
 
-fn is_temperature_unsupported_error(body: &str) -> bool {
-    let lower = body.to_ascii_lowercase();
-    lower.contains("temperature")
-        && (lower.contains("unsupported")
-            || lower.contains("not supported")
-            || lower.contains("unknown parameter")
-            || lower.contains("unrecognized")
-            || lower.contains("invalid parameter"))
+fn parse_openai_safe_error(status: StatusCode, body: &str) -> OpenAiSafeError {
+    let parsed: Option<OpenAiErrorEnvelope> = serde_json::from_str(body).ok();
+    let error = parsed.and_then(|envelope| envelope.error);
+
+    OpenAiSafeError {
+        user_message: if status.is_success() {
+            String::new()
+        } else {
+            AppError::RequestFormat.user_message().to_string()
+        },
+        http_status: Some(status.as_u16()),
+        error_type: error.as_ref().and_then(|value| value.error_type.clone()),
+        error_code: error.and_then(|value| match value.code {
+            Some(OpenAiErrorCode::String(code)) => Some(code),
+            Some(OpenAiErrorCode::Number(code)) => Some(code.to_string()),
+            None => None,
+        }),
+    }
 }
 
-fn is_model_unavailable_error(body: &str) -> bool {
-    let lower = body.to_ascii_lowercase();
-    lower.contains("invalid model")
-        || lower.contains("model")
-            && (lower.contains("not found")
-                || lower.contains("does not exist")
-                || lower.contains("unavailable")
-                || lower.contains("not available")
-                || lower.contains("no access")
-                || lower.contains("not have access")
-                || lower.contains("do not have access")
-                || lower.contains("unsupported model"))
+fn is_optional_parameter_error(error: &OpenAiSafeError) -> bool {
+    error
+        .error_code
+        .as_deref()
+        .map(|code| {
+            let lower = code.to_ascii_lowercase();
+            lower.contains("unsupported_parameter")
+                || lower.contains("unknown_parameter")
+                || lower.contains("invalid_parameter")
+        })
+        .unwrap_or(false)
+}
+
+fn is_model_unavailable_error(error: &OpenAiSafeError) -> bool {
+    let error_type = error
+        .error_type
+        .as_deref()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let error_code = error
+        .error_code
+        .as_deref()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+
+    error_code.contains("model_not_found")
+        || error_code.contains("model_not_available")
+        || error_code.contains("model_access")
+        || error_code.contains("unsupported_model")
+        || error_type.contains("model_not_found")
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -380,6 +355,25 @@ struct OpenAiModelsResponse {
 #[derive(Debug, Serialize, Deserialize)]
 struct OpenAiModel {
     id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct OpenAiErrorEnvelope {
+    error: Option<OpenAiErrorPayload>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct OpenAiErrorPayload {
+    #[serde(rename = "type")]
+    error_type: Option<String>,
+    code: Option<OpenAiErrorCode>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+enum OpenAiErrorCode {
+    String(String),
+    Number(i64),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -432,7 +426,7 @@ mod tests {
     #[test]
     fn correction_prompt_preserves_strict_scope() {
         let prompt = build_prompt("I has a pen.", TransformType::Correction);
-        assert!(prompt.system.contains("correct only objective grammar"));
+        assert!(prompt.system.contains("Correct only objective grammar"));
         assert!(prompt.user.contains("<text>\nI has a pen.\n</text>"));
     }
 

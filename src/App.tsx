@@ -376,9 +376,11 @@ export default function App() {
       } else if (message === "OpenAI request format failed. Please update the app.") {
         setModelError(
           modelAvailability === "available"
-            ? "Model is available, but the generation request failed. The app may need an OpenAI request-format update."
+            ? "Model is available, but the app's OpenAI request format failed. Please update the app."
             : message
         );
+      } else if (message === "OpenAI returned an unexpected response format. Please update the app.") {
+        setModelError("Model responded, but the app could not read the response format.");
       } else {
         setModelError(message);
       }
